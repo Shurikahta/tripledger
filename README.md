@@ -34,9 +34,16 @@ Este workspace contém agora o esqueleto funcional do MVP e a migração SQL. Ai
 - Configurar os modelos de email de Auth para enviar o token OTP, usando `{{ .Token }}` no modelo de acesso por email.
 - Os utilizadores ativam a conta validando o OTP; a associação pendente à viagem é ativada depois da confirmação do email. No primeiro acesso definem uma password.
 
-## Deploy
+## Deploy do frontend com Cloudflare Pages
 
-O frontend é uma SPA estática e pode ser publicado num alojamento de frontend. A base de dados, Auth, Edge Functions e Storage permanecem na Supabase. Definir `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY` no ambiente de build do alojamento do frontend.
+O frontend é uma SPA estática; a base de dados, Auth, Edge Functions e Storage permanecem na Supabase. Para publicar a partir do repositório `Shurikahta/tripledger`:
+
+1. No Cloudflare, criar um projeto Pages ligado ao GitHub e escolher a branch `main`.
+2. Definir o comando de build como `pnpm install --frozen-lockfile && pnpm run build` e a pasta de saída como `dist`.
+3. Em **Settings → Environment variables**, configurar `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY` para Preview e Production.
+4. Publicar. Depois, acrescentar o domínio `*.pages.dev` em **Supabase → Authentication → URL Configuration** como Site URL e Redirect URL.
+
+Sem as variáveis de ambiente, a app apresenta apenas o ecrã de configuração. As chaves `service_role`, SMTP e Resend são segredos do backend e nunca devem ser adicionadas às variáveis `VITE_*` nem ao Git.
 
 O bucket `expense-attachments` é privado e aceita PDF, JPG e PNG até 10 MB. Os caminhos dos ficheiros usam o formato `<trip_id>/<expense_id>/<nome>`.
 

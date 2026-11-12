@@ -1,0 +1,5 @@
+[functions.prepare-first-access]
+verify_jwt = false
+
+[functions.send-trip-invite]
+verify_jwt = true

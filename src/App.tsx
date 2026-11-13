@@ -14,6 +14,7 @@ type Share = { id: string; expense_id: string; trip_member_id: string; amount_ce
 type Schedule = { id: string; trip_member_id: string; due_date: string; planned_cents: number }
 type PlanRow = { due_date: string; planned_cents: number }
 type Repayment = { id: string; trip_member_id: string; paid_at: string; amount_cents: number; note: string | null }
+type UserProfile = { password_set_at: string | null; display_name: string | null }
 
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Ocorreu um erro. Tente novamente.'
 
@@ -21,7 +22,7 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [recoveryMode, setRecoveryMode] = useState(false)
   const [authLoading, setAuthLoading] = useState(true)
-  const [profile, setProfile] = useState<{ password_set_at: string | null } | null>(null)
+  const [profile, setProfile] = useState<UserProfile | null>(null)
   const [view, setView] = useState<'home' | 'trip'>('home')
   const [selectedTrip, setSelectedTrip] = useState<string | null>(null)
   const [trips, setTrips] = useState<Trip[]>([])
@@ -33,7 +34,7 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
-  const [modal, setModal] = useState<'trip' | 'invite' | 'expense' | 'plan' | 'repayment' | null>(null)
+  const [modal, setModal] = useState<'trip' | 'invite' | 'expense' | 'plan' | 'repayment' | 'users' | 'profile' | null>(null)
   const [search, setSearch] = useState('')
   const [expandedPerson, setExpandedPerson] = useState<string | null>(null)
 
@@ -51,7 +52,7 @@ export default function App() {
   useEffect(() => {
     if (!supabase || !session?.user) { setAuthLoading(false); return }
     let alive = true
-    void supabase.from('profiles').select('password_set_at').eq('id', session.user.id).maybeSingle()
+    void supabase.from('profiles').select('password_set_at, display_name').eq('id', session.user.id).maybeSingle()
       .then(({ data, error: queryError }) => {
         if (!alive) return
         if (queryError) setError(queryError.message)
@@ -100,6 +101,11 @@ export default function App() {
     setLoading(false)
   }
 
+  async function signOut() {
+    await supabase?.auth.signOut()
+    setModal(null)
+  }
+
   async function openTrip(tripId: string) {
     if (!supabase) return
     setError('')
@@ -132,8 +138,6 @@ export default function App() {
     } else { setShares([]); setSchedules([]); setRepayments([]) }
     setLoading(false)
   }
-
-  async function signOut() { await supabase?.auth.signOut() }
 
   async function resendInvite(memberId: string) {
     if (!supabase) return
@@ -173,14 +177,16 @@ export default function App() {
   const currentPaid = repayments.filter((payment) => payment.trip_member_id === currentUserMember?.id).reduce((sum, payment) => sum + payment.amount_cents, 0)
   const currentSchedule = schedules.filter((item) => item.trip_member_id === currentUserMember?.id)
   const currentPlanNeedsReview = currentSchedule.length > 0 && currentSchedule.reduce((sum, item) => sum + item.planned_cents, 0) !== Math.max(0, currentAssigned - currentPaid)
+  const profileName = (profile?.display_name ?? '').trim() || session?.user?.email?.split('@')[0] || 'Utilizador'
   const filteredTrips = useMemo(() => trips.filter((trip) => trip.name.toLowerCase().includes(search.toLowerCase())), [trips, search])
   const totalAmount = expenses.reduce((sum, expense) => sum + (expense.amount_cents ?? 0), 0)
+  const isAdminUser = Boolean(import.meta.env.VITE_ADMIN_EMAIL) && session?.user.email?.trim().toLowerCase() === import.meta.env.VITE_ADMIN_EMAIL.trim().toLowerCase()
 
   if (!isConfigured) return <SetupScreen />
   if (authLoading) return <div className="loading-screen"><div className="brand-mark">t</div><p>A preparar o teu espaço...</p></div>
   if (!session) return <AuthScreen onError={setError} error={error} />
   if (recoveryMode) return <SetPasswordScreen onDone={() => setRecoveryMode(false)} error={error} onError={setError} />
-  if (!profile?.password_set_at) return <SetPasswordScreen onDone={() => { setError(''); void supabase?.from('profiles').update({ password_set_at: new Date().toISOString() }).eq('id', session.user.id).then(({ error: e }) => { if (e) setError(e.message); else setProfile({ password_set_at: new Date().toISOString() }) }) }} error={error} onError={setError} />
+  if (!profile?.password_set_at) return <SetPasswordScreen onDone={() => { setError(''); void supabase?.from('profiles').update({ password_set_at: new Date().toISOString() }).eq('id', session.user.id).then(({ error: e }) => { if (e) setError(e.message); else setProfile({ password_set_at: new Date().toISOString(), display_name: profile?.display_name ?? null }) }) }} error={error} onError={setError} />
 
   return (
     <div className="app-shell">
@@ -194,20 +200,20 @@ export default function App() {
           {trips.length === 0 && <div className="empty-nav">As tuas viagens aparecem aqui.</div>}
         </div>
         <button className="new-trip-side" onClick={() => setModal('trip')}><Plus size={16} /> Criar viagem</button>
+        {isAdminUser && <button className="new-trip-side secondary" onClick={() => setModal('users')}><Users size={16} /> Gerir utilizadores</button>}
         <div className="sidebar-bottom">
           <div className="help-card"><div className="help-icon"><CircleHelp size={17} /></div><strong>Precisas de ajuda?</strong><span>Fala com o manager da tua viagem.</span></div>
-          <button className="user-chip" onClick={() => void signOut()}><div className="avatar">{session.user.email?.slice(0, 1).toUpperCase()}</div><span className="user-email">{session.user.email}</span><LogOut size={15} /></button>
         </div>
       </aside>
 
       <main className="main-area">
-        <header className="topbar"><div className="breadcrumbs"><span>Tripledger</span><span className="crumb-slash">/</span><strong>{view === 'home' ? 'Painel geral' : currentTrip?.name ?? 'Viagem'}</strong></div><div className="topbar-actions"><span className="secure-label"><ShieldCheck size={15} /> Espaço privado</span><div className="avatar small">{session.user.email?.slice(0, 1).toUpperCase()}</div></div></header>
+        <header className="topbar"><div className="breadcrumbs"><span>Tripledger</span><span className="crumb-slash">/</span><strong>{view === 'home' ? 'Painel geral' : currentTrip?.name ?? 'Viagem'}</strong></div><div className="topbar-actions"><span className="secure-label"><ShieldCheck size={15} /> Espaço privado</span><button className="avatar small" type="button" onClick={() => setModal('profile')}>{profileName.slice(0, 1).toUpperCase()}</button></div></header>
         {error && <div className="toast error-toast"><span>{error}</span><button onClick={() => setError('')}><X size={16} /></button></div>}
         {notice && <div className="toast success-toast"><Check size={16} /><span>{notice}</span><button onClick={() => setNotice('')}><X size={16} /></button></div>}
 
         {view === 'home' ? (
           <section className="page-content">
-            <div className="welcome-row"><div><div className="eyebrow">{new Intl.DateTimeFormat('pt-PT', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date()).toUpperCase()}</div><h1>Olá, {session.user.email?.split('@')[0]} <span className="wave">✳</span></h1><p className="subhead">Aqui está o resumo das tuas viagens e acertos.</p></div><button className="button primary" onClick={() => setModal('trip')}><Plus size={17} /> Nova viagem</button></div>
+            <div className="welcome-row"><div><div className="eyebrow">{new Intl.DateTimeFormat('pt-PT', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date()).toUpperCase()}</div><h1>Olá, {profileName} <span className="wave">✳</span></h1><p className="subhead">Aqui está o resumo das tuas viagens e acertos.</p></div><button className="button primary" onClick={() => setModal('trip')}><Plus size={17} /> Nova viagem</button></div>
             <div className="metric-grid">
               <Metric icon={<ReceiptText size={18} />} label="Viagens ativas" value={String(trips.length)} tone="mint" detail="Acompanha os teus acertos" />
               <Metric icon={<WalletCards size={18} />} label="Total atribuído" value={money(ownAssigned)} tone="peach" detail="Nas tuas viagens" />
@@ -231,36 +237,45 @@ export default function App() {
         ) : <LoadingRows />}
       </main>
 
-      {modal && <Modal title={modalTitle(modal)} onClose={() => setModal(null)}>{modal === 'trip' ? <TripForm onCancel={() => setModal(null)} onSave={async (name, start, end) => { if (!supabase) return; const { error: e } = await supabase.from('trips').insert({ name, start_date: start || null, end_date: end || null, created_by: session.user.id }); if (e) throw e; await loadTrips(); setModal(null); setNotice('Viagem criada. Já és manager desta viagem.'); }} /> : modal === 'invite' ? <InviteForm tripId={selectedTrip!} onCancel={() => setModal(null)} onSave={async (email) => { if (!supabase) return; const { data, error: e } = await supabase.from('trip_members').insert({ trip_id: selectedTrip, email, role: 'participant', status: 'pending', invited_by: session.user.id }).select('id').single(); if (e) throw e; const { error: inviteError } = await supabase.functions.invoke('send-trip-invite', { body: { member_id: data.id } }); await openTrip(selectedTrip!); setModal(null); setNotice(inviteError ? 'Convite guardado. O envio de email ainda não está configurado.' : 'Convite enviado por email.'); }} /> : modal === 'expense' ? <ExpenseForm members={members.filter((m) => m.status !== 'revoked')} onCancel={() => setModal(null)} onSave={async (description, cents, allocations, required, file) => { if (!supabase) return; const sharesPayload = allocations.map((item) => ({ trip_member_id: item.member, amount_cents: item.cents })); if (file && (file.size > 10485760 || !['application/pdf','image/jpeg','image/png'].includes(file.type))) throw new Error('O anexo deve ser PDF, JPG ou PNG até 10 MB.'); const expenseId = crypto.randomUUID(); let attachmentPath: string | null = null; if (file) { attachmentPath = `${selectedTrip}/${expenseId}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`; const { error: uploadError } = await supabase.storage.from('expense-attachments').upload(attachmentPath, file, { upsert: false }); if (uploadError) throw uploadError }; const { error: e } = await supabase.rpc('create_expense_with_shares', { p_expense_id: expenseId, p_trip_id: selectedTrip, p_description: description, p_amount_cents: cents, p_attachment_required: required, p_attachment_path: attachmentPath, p_shares: sharesPayload }); if (e) { if (attachmentPath) await supabase.storage.from('expense-attachments').remove([attachmentPath]); throw e }; await openTrip(selectedTrip!); setModal(null); setNotice('Despesa e repartição registadas.'); }} /> : modal === 'plan' ? <PlanForm members={members.filter((m) => m.status !== 'revoked')} selected={expandedPerson} shares={shares} schedules={schedules} repayments={repayments} onCancel={() => setModal(null)} onSave={async (memberId, planRows) => { if (!supabase) return; const { error: planError } = await supabase.rpc('replace_payment_schedule', { p_member_id: memberId, p_rows: planRows }); if (planError) throw planError; await openTrip(selectedTrip!); setModal(null); setNotice('Plano de pagamento atualizado.'); }} /> : <RepaymentForm members={members.filter((m) => m.status !== 'revoked')} selected={expandedPerson ?? currentUserMember?.id ?? null} isManager={isManager} onCancel={() => setModal(null)} onSave={recordRepayment} />}</Modal>}
+      {modal === 'profile' && (
+        <Modal title={modalTitle('profile')} onClose={() => setModal(null)}>
+          <ProfileNameForm currentName={profileName} onCancel={() => setModal(null)} onLogout={() => void signOut()} onSave={async (name) => { if (!supabase) return; const nextName = name.trim(); const { error: e } = await supabase.from('profiles').update({ display_name: nextName || null }).eq('id', session.user.id); if (e) throw e; setProfile((current) => ({ ...(current ?? { password_set_at: null, display_name: null }), display_name: nextName || null })); setModal(null); setNotice('Nome de utilizador atualizado.'); }} />
+        </Modal>
+      )}
+      {modal && modal !== 'profile' && <Modal title={modalTitle(modal)} onClose={() => setModal(null)}>{modal === 'trip' ? <TripForm onCancel={() => setModal(null)} onSave={async (name, start, end) => { if (!supabase) return; const { error: e } = await supabase.from('trips').insert({ name, start_date: start || null, end_date: end || null, created_by: session.user.id }); if (e) throw e; await loadTrips(); setModal(null); setNotice('Viagem criada. Já és manager desta viagem.'); }} /> : modal === 'invite' ? <InviteForm tripId={selectedTrip!} onCancel={() => setModal(null)} onSave={async (email) => { if (!supabase) return; const { data, error: e } = await supabase.from('trip_members').insert({ trip_id: selectedTrip, email, role: 'participant', status: 'pending', invited_by: session.user.id }).select('id').single(); if (e) throw e; const { error: inviteError } = await supabase.functions.invoke('send-trip-invite', { body: { member_id: data.id } }); await openTrip(selectedTrip!); setModal(null); setNotice(inviteError ? 'Convite guardado. O envio de email ainda não está configurado.' : 'Convite enviado por email.'); }} /> : modal === 'users' ? <UserManagementForm onCancel={() => setModal(null)} onCreate={async (email, password) => { if (!supabase) return; const { error: createError } = await supabase.functions.invoke('create-managed-user', { body: { email, password } }); if (createError) throw createError; setModal(null); setNotice('Conta criada. Entrega a password ao utilizador e pede que a altere no primeiro acesso.'); }} /> : modal === 'expense' ? <ExpenseForm members={members.filter((m) => m.status !== 'revoked')} onCancel={() => setModal(null)} onSave={async (description, cents, allocations, required, file) => { if (!supabase) return; const sharesPayload = allocations.map((item) => ({ trip_member_id: item.member, amount_cents: item.cents })); if (file && (file.size > 10485760 || !['application/pdf','image/jpeg','image/png'].includes(file.type))) throw new Error('O anexo deve ser PDF, JPG ou PNG até 10 MB.'); const expenseId = crypto.randomUUID(); let attachmentPath: string | null = null; if (file) { attachmentPath = `${selectedTrip}/${expenseId}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`; const { error: uploadError } = await supabase.storage.from('expense-attachments').upload(attachmentPath, file, { upsert: false }); if (uploadError) throw uploadError }; const { error: e } = await supabase.rpc('create_expense_with_shares', { p_expense_id: expenseId, p_trip_id: selectedTrip, p_description: description, p_amount_cents: cents, p_attachment_required: required, p_attachment_path: attachmentPath, p_shares: sharesPayload }); if (e) { if (attachmentPath) await supabase.storage.from('expense-attachments').remove([attachmentPath]); throw e }; await openTrip(selectedTrip!); setModal(null); setNotice('Despesa e repartição registadas.'); }} /> : modal === 'plan' ? <PlanForm members={members.filter((m) => m.status !== 'revoked')} selected={expandedPerson} shares={shares} schedules={schedules} repayments={repayments} onCancel={() => setModal(null)} onSave={async (memberId, planRows) => { if (!supabase) return; const { error: planError } = await supabase.rpc('replace_payment_schedule', { p_member_id: memberId, p_rows: planRows }); if (planError) throw planError; await openTrip(selectedTrip!); setModal(null); setNotice('Plano de pagamento atualizado.'); }} /> : <RepaymentForm members={members.filter((m) => m.status !== 'revoked')} selected={expandedPerson ?? currentUserMember?.id ?? null} isManager={isManager} onCancel={() => setModal(null)} onSave={recordRepayment} />}</Modal>}
     </div>
   )
 }
 
-function modalTitle(type: string) { return ({ trip: 'Criar viagem', invite: 'Convidar participante', expense: 'Adicionar despesa', plan: 'Plano de pagamento', repayment: 'Registar abatimento' } as Record<string,string>)[type] }
+function modalTitle(type: string) { return ({ trip: 'Criar viagem', invite: 'Convidar participante', expense: 'Adicionar despesa', plan: 'Plano de pagamento', repayment: 'Registar abatimento', users: 'Gerir utilizadores', profile: 'Editar nome do utilizador' } as Record<string,string>)[type] }
 
 function SetupScreen() {
-  return <div className="setup-screen"><div className="setup-card"><span className="brand-mark">t</span><p className="eyebrow">TRIPLEDGER · MVP</p><h1>Vamos ligar a tua base de dados.</h1><p>Cria um projeto Supabase, configura a base de dados e adiciona as credenciais ao ficheiro <code>.env.local</code>.</p><div className="setup-steps"><span><b>1</b> Cria um projeto na Supabase</span><span><b>2</b> Executa <code>supabase/migrations/202611120001_init.sql</code></span><span><b>3</b> Copia <code>.env.example</code> para <code>.env.local</code> e preenche os valores</span></div><a className="button primary" href="https://supabase.com/dashboard" target="_blank" rel="noreferrer">Abrir Supabase <ArrowUpRight size={16}/></a></div></div>
+  return <div className="setup-screen"><div className="setup-card"><span className="brand-mark">t</span><p className="eyebrow">TRIPLEDGER · MVP</p><h1>Vamos ligar a tua base de dados.</h1><p>Cria um projeto Supabase, configura a base de dados e adiciona as credenciais ao ficheiro <code>.env.local</code>.</p><div className="setup-steps"><span><b>1</b> Cria um projeto na Supabase</span><span><b>2</b> Executa as migrações em <code>supabase/migrations/</code></span><span><b>3</b> Copia <code>.env.example</code> para <code>.env.local</code> e preenche os valores</span></div><a className="button primary" href="https://supabase.com/dashboard" target="_blank" rel="noreferrer">Abrir Supabase <ArrowUpRight size={16}/></a></div></div>
 }
 
 function AuthScreen({ error, onError }: { error: string; onError: (value: string) => void }) {
-  const [mode, setMode] = useState<'login' | 'otp'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [code, setCode] = useState('')
-  const [sent, setSent] = useState(false)
   const [busy, setBusy] = useState(false)
   const [info, setInfo] = useState('')
-  async function sendOtp(e: FormEvent) { e.preventDefault(); if (!supabase) return; setBusy(true); onError(''); const { error: invokeError } = await supabase.functions.invoke('prepare-first-access', { body: { email: email.trim().toLowerCase() } }); if (invokeError) { onError(invokeError.message); setBusy(false); return }; const { error: otpError } = await supabase.auth.signInWithOtp({ email: email.trim().toLowerCase(), options: { shouldCreateUser: false } }); if (otpError) onError(otpError.message); else setSent(true); setBusy(false) }
-  async function verifyOtp(e: FormEvent) { e.preventDefault(); if (!supabase) return; setBusy(true); onError(''); const { error: verifyError } = await supabase.auth.verifyOtp({ email: email.trim().toLowerCase(), token: code, type: 'email' }); if (verifyError) onError(verifyError.message); else { const { error: acceptError } = await supabase.rpc('activate_my_invites'); if (acceptError) onError(acceptError.message) }; setBusy(false) }
-  async function login(e: FormEvent) { e.preventDefault(); if (!supabase) return; setBusy(true); onError(''); const { error: loginError } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password }); if (loginError) onError('Email ou password inválidos.'); setBusy(false) }
-  async function requestPasswordReset() { if (!supabase) return; if (!email.trim()) { onError('Introduz o teu email para receber o link de recuperação.'); return }; const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), { redirectTo: window.location.origin }); if (resetError) onError(resetError.message); else { onError(''); setInfo('Se o email tiver conta, receberás um link para definir uma nova password.') } }
-  return <div className="auth-screen"><div className="auth-story"><div className="brand light"><span className="brand-mark">t</span><span>tripledger<span className="brand-dot">.</span></span></div><div className="story-copy"><p className="eyebrow">VIAGENS, SEM SURPRESAS</p><h1>Despesas partilhadas.<br/><em>Acertos claros.</em></h1><p>Acompanha cada viagem, cada despesa e cada acerto — tudo num só lugar.</p></div><div className="story-footer"><ShieldCheck size={16}/> Os teus valores são privados e só tu os podes consultar.</div><div className="story-shape shape-one"/><div className="story-shape shape-two"/></div><div className="auth-form-side"><div className="auth-form-wrap"><span className="form-kicker">BEM-VINDO DE VOLTA</span><h2>{mode === 'login' ? 'Iniciar sessão' : sent ? 'Confirma o teu email' : 'Primeiro acesso'}</h2><p>{mode === 'login' ? 'Entra para veres as tuas viagens e acertos.' : sent ? `Enviámos um código de 6 dígitos para ${email}.` : 'Recebeste um convite? Valida o teu email para ativar a conta.'}</p>{error && <div className="inline-error">{error}</div>}{info && <div className="inline-info">{info}</div>}{mode === 'login' ? <form onSubmit={(e) => void login(e)} className="form-stack"><label>Email<input type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tu@exemplo.com"/></label><label>Password<input type="password" required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="A tua password"/></label><button className="button primary full-button" disabled={busy}>{busy ? 'A entrar...' : 'Entrar'} <ArrowUpRight size={16}/></button><button type="button" className="link-button" onClick={() => { setMode('otp'); onError('') }}>Primeiro acesso? Usa o teu convite</button><button type="button" className="link-button" onClick={() => void requestPasswordReset()}>Esqueci-me da password</button></form> : !sent ? <form onSubmit={(e) => void sendOtp(e)} className="form-stack"><label>Email do convite<input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nome@exemplo.com"/></label><button className="button primary full-button" disabled={busy}>{busy ? 'A validar convite...' : 'Enviar código OTP'} <Mail size={16}/></button><button type="button" className="link-button" onClick={() => { setMode('login'); onError('') }}>Já tens password? Inicia sessão</button></form> : <form onSubmit={(e) => void verifyOtp(e)} className="form-stack"><label>Código de 6 dígitos<input className="otp-input" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required value={code} onChange={(e) => setCode(e.target.value)} placeholder="000000"/></label><button className="button primary full-button" disabled={busy}>{busy ? 'A validar...' : 'Validar código'} <Check size={16}/></button><button type="button" className="link-button" onClick={() => setSent(false)}>Reenviar código</button></form>}<div className="auth-caption">Acesso apenas por convite de email.</div></div></div></div>
+
+  async function login(e: FormEvent) {
+    e.preventDefault()
+    if (!supabase) return
+    setBusy(true)
+    onError('')
+    setInfo('')
+    const { error: loginError } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password })
+    if (loginError) onError('Email ou password inválidos.')
+    setBusy(false)
+  }
+  return <div className="auth-screen"><div className="auth-story"><div className="brand light"><span className="brand-mark">t</span><span>tripledger<span className="brand-dot">.</span></span></div><div className="story-copy"><p className="eyebrow">VIAGENS, SEM SURPRESAS</p><h1>Despesas partilhadas.<br/><em>Acertos claros.</em></h1><p>Acompanha cada viagem, cada despesa e cada acerto — tudo num só lugar.</p></div><div className="story-footer"><ShieldCheck size={16}/> Os teus valores são privados e só tu os podes consultar.</div><div className="story-shape shape-one"/><div className="story-shape shape-two"/></div><div className="auth-form-side"><div className="auth-form-wrap"><span className="form-kicker">BEM-VINDO DE VOLTA</span><h2>Iniciar sessão</h2><p>Entra com as tuas credenciais diretas.</p>{error && <div className="inline-error">{error}</div>}{info && <div className="inline-info">{info}</div>}<form onSubmit={(e) => void login(e)} className="form-stack"><label>Email<input type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tu@exemplo.com"/></label><label>Password<input type="password" required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="A tua password"/></label><button className="button primary full-button" disabled={busy}>{busy ? 'A entrar...' : 'Entrar'} <ArrowUpRight size={16}/></button></form></div></div></div>
 }
 
 function SetPasswordScreen({ onDone, error, onError }: { onDone: () => void; error: string; onError: (value: string) => void }) {
   const [password, setPassword] = useState(''); const [confirm, setConfirm] = useState(''); const [busy, setBusy] = useState(false)
   async function submit(e: FormEvent) { e.preventDefault(); if (!supabase) return; if (password !== confirm) { onError('As passwords não coincidem.'); return }; if (password.length < 10) { onError('Escolhe uma password com pelo menos 10 caracteres.'); return }; setBusy(true); onError(''); const { error: updateError } = await supabase.auth.updateUser({ password }); if (updateError) onError(updateError.message); else onDone(); setBusy(false) }
-  return <div className="setup-screen"><div className="setup-card"><span className="brand-mark">t</span><p className="eyebrow">PRIMEIRO ACESSO</p><h1>Define a tua password.</h1><p>O código foi validado. Cria agora uma password pessoal para os próximos acessos.</p>{error && <div className="inline-error">{error}</div>}<form className="form-stack" onSubmit={(e) => void submit(e)}><label>Nova password<input type="password" minLength={10} required value={password} onChange={(e) => setPassword(e.target.value)}/></label><label>Confirmar password<input type="password" minLength={10} required value={confirm} onChange={(e) => setConfirm(e.target.value)}/></label><button className="button primary full-button" disabled={busy}>{busy ? 'A guardar...' : 'Guardar password'} <Check size={16}/></button></form></div></div>
+  return <div className="setup-screen"><div className="setup-card"><span className="brand-mark">t</span><p className="eyebrow">PRIMEIRO ACESSO</p><h1>Define a tua password.</h1><p>A tua conta foi criada pelo administrador. Define uma password pessoal para os próximos acessos.</p>{error && <div className="inline-error">{error}</div>}<form className="form-stack" onSubmit={(e) => void submit(e)}><label>Nova password<input type="password" minLength={10} required value={password} onChange={(e) => setPassword(e.target.value)}/></label><label>Confirmar password<input type="password" minLength={10} required value={confirm} onChange={(e) => setConfirm(e.target.value)}/></label><button className="button primary full-button" disabled={busy}>{busy ? 'A guardar...' : 'Guardar password'} <Check size={16}/></button></form></div></div>
 }
 
 function Metric({ icon, label, value, detail, tone }: { icon: ReactNode; label: string; value: string; detail: string; tone: string }) { return <div className="metric-card"><div className={`metric-icon ${tone}`}>{icon}</div><div><span>{label}</span><strong>{value}</strong><small>{detail}</small></div></div> }
@@ -284,6 +299,75 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 function TripForm({ onCancel, onSave }: { onCancel: () => void; onSave: (name: string, start: string, end: string) => Promise<void> }) { const [name, setName] = useState(''); const [start, setStart] = useState(''); const [end, setEnd] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState(''); async function submit(e: FormEvent) { e.preventDefault(); setBusy(true); setError(''); try { await onSave(name.trim(), start, end) } catch (e) { setError(errorMessage(e)) } finally { setBusy(false) } } return <form className="modal-form" onSubmit={(e) => void submit(e)}><p className="modal-hint">Cria um espaço para registar despesas e organizar os acertos do grupo.</p><label>Nome da viagem<input autoFocus required maxLength={100} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Fim de semana no Porto"/></label><div className="form-row"><label>Data de início<input type="date" value={start} onChange={(e) => setStart(e.target.value)}/></label><label>Data de fim<input type="date" min={start || undefined} value={end} onChange={(e) => setEnd(e.target.value)}/></label></div>{error && <div className="inline-error">{error}</div>}<div className="modal-actions"><button type="button" className="button secondary" onClick={onCancel}>Cancelar</button><button className="button primary" disabled={busy}>{busy ? 'A criar...' : 'Criar viagem'} <ArrowUpRight size={16}/></button></div></form> }
 
 function InviteForm({ tripId, onCancel, onSave }: { tripId: string; onCancel: () => void; onSave: (email: string) => Promise<void> }) { const [email, setEmail] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState(''); async function submit(e: FormEvent) { e.preventDefault(); setBusy(true); setError(''); try { await onSave(email.trim().toLowerCase()) } catch (e) { setError(errorMessage(e)) } finally { setBusy(false) } } return <form className="modal-form" onSubmit={(e) => void submit(e)}><p className="modal-hint">O convite é enviado por email. O endereço pode ser de qualquer domínio; a conta fica pendente até ao primeiro acesso.</p><input type="hidden" value={tripId}/><label>Email do participante<input autoFocus type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="pessoa@exemplo.com"/></label>{error && <div className="inline-error">{error}</div>}<div className="modal-actions"><button type="button" className="button secondary" onClick={onCancel}>Cancelar</button><button className="button primary" disabled={busy}>{busy ? 'A enviar...' : 'Enviar convite'} <Mail size={16}/></button></div></form> }
+
+function ProfileNameForm({ currentName, onCancel, onLogout, onSave }: { currentName: string; onCancel: () => void; onLogout: () => void; onSave: (name: string) => Promise<void> }) {
+  const [name, setName] = useState(currentName)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function submit(e: FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    setError('')
+    try {
+      const trimmed = name.trim()
+      if (!trimmed) throw new Error('O nome não pode ficar vazio.')
+      if (trimmed.length > 30) throw new Error('O nome pode ter até 30 caracteres.')
+      await onSave(trimmed)
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <form className="modal-form" onSubmit={(e) => void submit(e)}>
+    <p className="modal-hint">Escolhe o nome que pretendes ver no teu avatar e nas saudações da aplicação.</p>
+    <label>Nome de utilizador<input autoFocus required maxLength={30} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Mário" /></label>
+    {error && <div className="inline-error">{error}</div>}
+    <div className="modal-actions"><button type="button" className="button secondary" onClick={onLogout}><LogOut size={16}/> Terminar sessão</button><div><button type="button" className="button secondary" onClick={onCancel}>Cancelar</button><button className="button primary" disabled={busy}>{busy ? 'A guardar...' : 'Guardar nome'} <Check size={16}/></button></div></div>
+  </form>
+}
+
+function UserManagementForm({ onCancel, onCreate }: { onCancel: () => void; onCreate: (email: string, password: string) => Promise<void> }) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState(generateInternalPassword())
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [info, setInfo] = useState('')
+
+  async function submit(e: FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    setError('')
+    setInfo('')
+    try {
+      const normalized = email.trim().toLowerCase()
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) throw new Error('Introduz um email válido.')
+      if (password.length < 10) throw new Error('A password deve ter pelo menos 10 caracteres.')
+      await onCreate(normalized, password)
+      setEmail('')
+      setPassword(generateInternalPassword())
+      setInfo('Conta criada. Guarda esta password e envia-a ao utilizador.')
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <form className="modal-form" onSubmit={(e) => void submit(e)}>
+    <p className="modal-hint">Cria contas diretamente com email e password, sem OTP nem confirmação por email. A password pode ser gerada internamente e enviada ao utilizador.</p>
+    <label>Email do utilizador<input autoFocus type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="novo-utilizador@empresa.pt"/></label>
+    <div className="form-row">
+      <label>Password<input type="text" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Senha gerada"/></label>
+      <button type="button" className="button secondary" onClick={() => setPassword(generateInternalPassword())}>Gerar</button>
+    </div>
+    {error && <div className="inline-error">{error}</div>}
+    {info && <div className="inline-info">{info}</div>}
+    <div className="modal-actions"><button type="button" className="button secondary" onClick={onCancel}>Cancelar</button><button className="button primary" disabled={busy}>{busy ? 'A criar...' : 'Criar utilizador'} <Users size={16}/></button></div>
+  </form>
+}
 
 type Allocation = { member: string; cents: number }
 function ExpenseForm({ members, onCancel, onSave }: { members: Member[]; onCancel: () => void; onSave: (description: string, cents: number, allocations: Allocation[], required: boolean, file: File | null) => Promise<void> }) { const [description, setDescription] = useState(''); const [amount, setAmount] = useState(''); const [required, setRequired] = useState(false); const [file, setFile] = useState<File | null>(null); const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [custom, setCustom] = useState(false); const [values, setValues] = useState<Record<string,string>>({}); const cents = eurosToCents(amount); const equal = splitEvenly(cents, members.map((m) => m.id)); const allocations = custom ? members.map((m) => ({ member: m.id, cents: eurosToCents(values[m.id] || '') })) : equal; const allocated = allocations.reduce((sum, item) => sum + item.cents, 0); async function submit(e: FormEvent) { e.preventDefault(); if (!members.length) { setError('Adiciona participantes antes de registar despesas.'); return }; if (allocated !== cents) { setError('A soma das partes tem de corresponder ao valor total.'); return }; if (required && !file) { setError('Anexa o comprovativo solicitado para esta despesa.'); return }; setBusy(true); setError(''); try { await onSave(description.trim(), cents, allocations, required, file) } catch (e) { setError(errorMessage(e)) } finally { setBusy(false) } } return <form className="modal-form" onSubmit={(e) => void submit(e)}><p className="modal-hint">A despesa é repartida por todos os participantes ativos. Podes ajustar as partes manualmente.</p><label>Descritivo<input autoFocus required maxLength={140} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Ex.: Alojamento — duas noites"/></label><label>Valor total (€)<input type="number" min="0.01" step="0.01" required value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0,00"/></label><div className="allocation-head"><strong>Repartição</strong><button type="button" className="link-button inline-link" onClick={() => setCustom(!custom)}>{custom ? 'Dividir igualmente' : 'Personalizar valores'}</button></div><div className="allocation-list">{members.map((member) => <label className="allocation-row" key={member.id}><span><span className="avatar mini-avatar">{member.email.slice(0,1).toUpperCase()}</span>{member.email}</span>{custom ? <input aria-label={`Parte de ${member.email}`} type="number" min="0" step="0.01" value={values[member.id] ?? ((equal.find((v) => v.member === member.id)?.cents ?? 0) / 100).toFixed(2)} onChange={(e) => setValues({ ...values, [member.id]: e.target.value })}/> : <strong>{money(equal.find((v) => v.member === member.id)?.cents ?? 0)}</strong>}</label>)}</div><div className="allocation-total"><span>Total repartido</span><strong className={allocated !== cents ? 'invalid-value' : ''}>{money(allocated)} <small>/ {money(cents)}</small></strong></div><div className="upload-field"><label htmlFor="expense-file" className="upload-drop"><Upload size={17}/><span>{file ? file.name : 'Adicionar comprovativo (opcional)'}</span><small>PDF, JPG ou PNG</small></label><input id="expense-file" type="file" accept="application/pdf,image/jpeg,image/png" hidden onChange={(e) => setFile(e.target.files?.[0] ?? null)}/><label className="check-label"><input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)}/> Este comprovativo é obrigatório</label></div>{error && <div className="inline-error">{error}</div>}<div className="modal-actions"><button type="button" className="button secondary" onClick={onCancel}>Cancelar</button><button className="button primary" disabled={busy}>{busy ? 'A guardar...' : 'Registar despesa'} <Check size={16}/></button></div></form> }
@@ -348,6 +432,15 @@ function PlanForm({ members, selected, shares, schedules, repayments, onCancel, 
 function RepaymentForm({ members, selected, isManager, onCancel, onSave }: { members: Member[]; selected: string | null; isManager: boolean; onCancel: () => void; onSave: (member: string, cents: number, date: string, note: string) => Promise<void> }) { const [member, setMember] = useState(selected ?? members.find((m) => m.role !== 'manager')?.id ?? ''); const [amount, setAmount] = useState(''); const [date, setDate] = useState(todayISO()); const [note, setNote] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState(''); async function submit(e: FormEvent) { e.preventDefault(); if (!isManager) { setError('Só o manager pode confirmar um abatimento.'); return }; setBusy(true); setError(''); try { await onSave(member, eurosToCents(amount), date, note) } catch (e) { setError(errorMessage(e)) } finally { setBusy(false) } } return <form className="modal-form" onSubmit={(e) => void submit(e)}><p className="modal-hint">Regista o valor efetivamente abatido e a data em que aconteceu. Pode diferir da tranche prevista.</p><label>Participante<select required value={member} onChange={(e) => setMember(e.target.value)}>{members.map((m) => <option key={m.id} value={m.id}>{m.email}</option>)}</select></label><div className="form-row"><label>Valor abatido (€)<input type="number" min="0.01" step="0.01" required value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0,00"/></label><label>Data efetiva<input type="date" required value={date} onChange={(e) => setDate(e.target.value)}/></label></div><label>Nota (opcional)<input maxLength={240} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ex.: abatimento parcial deste mês"/></label>{error && <div className="inline-error">{error}</div>}<div className="modal-actions"><button type="button" className="button secondary" onClick={onCancel}>Cancelar</button><button className="button primary" disabled={busy || !isManager}>{busy ? 'A registar...' : 'Confirmar abatimento'} <Check size={16}/></button></div></form> }
 
 function splitEvenly(total: number, ids: string[]) { if (!ids.length || total <= 0) return ids.map((member) => ({ member, cents: 0 })); const base = Math.floor(total / ids.length); const remainder = total % ids.length; return ids.map((member, index) => ({ member, cents: base + (index < remainder ? 1 : 0) })) }
+function generateInternalPassword(length = 14) {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*'
+  const randomValues = crypto.getRandomValues(new Uint8Array(length))
+  let output = ''
+  for (let index = 0; index < length; index += 1) {
+    output += alphabet[randomValues[index] % alphabet.length]
+  }
+  return output
+}
 function todayISO() { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}` }
 function addOneMonthClamped(dateValue: string) { const current = new Date(`${dateValue}T12:00:00`); const year = current.getFullYear(); const month = current.getMonth() + 1; const day = Math.min(current.getDate(), new Date(year, month + 1, 0).getDate()); return new Date(year, month, day, 12).toISOString().slice(0,10) }
 function monthDate(anchorDate: string, offset: number, anchorDay: number) { const anchor = new Date(`${anchorDate}T12:00:00`); const year = anchor.getFullYear(); const month = anchor.getMonth() + offset; return new Date(year, month, Math.min(anchorDay, new Date(year, month + 1, 0).getDate()), 12).toISOString().slice(0,10) }

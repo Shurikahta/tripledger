@@ -40,7 +40,7 @@ Deno.serve(async (request) => {
         from,
         to: [member.email],
         subject: `Convite para ${trip?.name ?? 'uma viagem'}`,
-        html: `<div style="font-family:Arial,sans-serif;color:#26352f;max-width:560px;margin:auto;padding:28px"><p style="color:#5c9b80;font-weight:700;letter-spacing:1px">TRIPLEDGER</p><h1 style="font-size:24px">Foste convidado para uma viagem</h1><p>Foi-te enviado um convite para <strong>${escapeHtml(trip?.name ?? 'uma viagem')}</strong>.</p><p>Abre a aplicação e usa o teu endereço de email para receber um código OTP e ativar a conta.</p><p style="margin:28px 0"><a href="${escapeHtml(appUrl)}" style="background:#285b4a;color:#fff;padding:13px 18px;border-radius:9px;text-decoration:none">Abrir Tripledger</a></p><p style="color:#6d7772;font-size:13px">Se não estavas à espera deste convite, podes ignorar esta mensagem.</p></div>`,
+        html: `<div style="font-family:Arial,sans-serif;color:#26352f;max-width:560px;margin:auto;padding:28px"><p style="color:#5c9b80;font-weight:700;letter-spacing:1px">TRIPLEDGER</p><h1 style="font-size:24px">Foste convidado para uma viagem</h1><p>Foi-te enviado um convite para <strong>${escapeHtml(trip?.name ?? 'uma viagem')}</strong>.</p><p>Abre a aplicação e inicia sessão com o teu email e a password que te foi entregue pelo administrador.</p><p style="margin:28px 0"><a href="${escapeHtml(appUrl)}" style="background:#285b4a;color:#fff;padding:13px 18px;border-radius:9px;text-decoration:none">Abrir Tripledger</a></p><p style="color:#6d7772;font-size:13px">Se não estavas à espera deste convite, podes ignorar esta mensagem.</p></div>`,
       }),
     })
     if (!response.ok) return json({ error: 'O serviço de email não conseguiu enviar o convite.' }, 502)

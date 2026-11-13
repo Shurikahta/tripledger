@@ -3,3 +3,6 @@ verify_jwt = false
 
 [functions.send-trip-invite]
 verify_jwt = true
+
+[functions.create-managed-user]
+verify_jwt = true

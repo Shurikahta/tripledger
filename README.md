@@ -4,14 +4,14 @@ Aplicação web para viagens, despesas partilhadas e abatimentos por participant
 
 ## Estado
 
-Este workspace contém agora o esqueleto funcional do MVP e a migração SQL. Ainda não existe um projeto Supabase ligado, nem credenciais de email ou alojamento configuradas.
+O MVP inclui login direto por email/password, gestão de utilizadores, viagens, despesas e acertos. O frontend usa Supabase; a publicação está preparada para GitHub Pages através de GitHub Actions.
 
 ## Desenvolvimento local
 
 1. Instalar Node.js e pnpm.
-2. Criar um projeto Supabase e executar `supabase/migrations/202611120001_init.sql` no SQL Editor.
+2. Criar um projeto Supabase e executar as migrações em `supabase/migrations/` por ordem cronológica. Num projeto já existente, aplicar também `202611130001_profile_display_name.sql` para ativar a edição do nome no perfil.
 3. Copiar `.env.example` para `.env.local` e preencher o URL do projeto e a publishable key.
-4. Configurar um servidor SMTP próprio para os OTPs. O servidor de email padrão da Supabase é apenas para testes e não envia para qualquer endereço convidado.
+4. Desativar o registo público de utilizadores no Supabase Auth; as contas são criadas pela Edge Function administrativa.
 5. Instalar dependências e iniciar:
 
    ```sh
@@ -19,31 +19,34 @@ Este workspace contém agora o esqueleto funcional do MVP e a migração SQL. Ai
    pnpm dev
    ```
 
-## Convites e primeiro acesso
+## Utilizadores e convites
 
-- Desativar o registo público de utilizadores nas definições de Auth da Supabase. A Edge Function `prepare-first-access` cria uma identidade apenas depois de confirmar um convite pendente.
-- Depois da migração e antes do primeiro acesso, inserir o email inicial autorizado na tabela `bootstrap_invites` (via SQL Editor):
+- O login normal usa email e password; a aplicação não usa OTP nem confirmação de email.
+- O utilizador administrador cria as contas na página **Gerir utilizadores**, define ou gera uma password inicial e entrega as credenciais diretamente ao utilizador.
+- O formulário de gestão chama `create-managed-user`, que valida a sessão e compara o email do utilizador autenticado com o secret `ADMIN_EMAIL`. A função cria a conta confirmada através da Admin API do Supabase, sem enviar email.
+- Publicar a função e configurar o administrador com a Supabase CLI:
 
-  ```sql
-  insert into public.bootstrap_invites (email) values (lower('primeiro.manager@exemplo.com'));
-  ```
+   ```sh
+   supabase login
+   supabase link --project-ref <project-ref>
+   supabase secrets set ADMIN_EMAIL=admin@example.com
+   supabase functions deploy create-managed-user
+   ```
 
-  Esse endereço recebe acesso OTP uma vez e pode criar a primeira viagem. A autorização inicial é consumida na ativação; depois, os managers convidam participantes por viagem.
-- Publicar as Edge Functions `prepare-first-access` e `send-trip-invite`.
-- Para `send-trip-invite`, configurar os secrets `RESEND_API_KEY`, `INVITE_FROM_EMAIL` e `APP_URL` no projeto Supabase. O serviço Resend requer um domínio remetente verificado.
-- Configurar os modelos de email de Auth para enviar o token OTP, usando `{{ .Token }}` no modelo de acesso por email.
-- Os utilizadores ativam a conta validando o OTP; a associação pendente à viagem é ativada depois da confirmação do email. No primeiro acesso definem uma password.
+- Os convites para uma viagem são distintos da criação de contas. Para enviar notificações, publicar também `send-trip-invite` e configurar `RESEND_API_KEY`, `INVITE_FROM_EMAIL` e `APP_URL` como secrets da Supabase.
+- `prepare-first-access` e `bootstrap_invites` pertencem ao fluxo antigo de OTP e não são necessários para o login direto atual.
 
-## Deploy do frontend com Cloudflare Pages
+## Publicar no GitHub Pages
 
-O frontend é uma SPA estática; a base de dados, Auth, Edge Functions e Storage permanecem na Supabase. Para publicar a partir do repositório `Shurikahta/tripledger`:
+O frontend é uma SPA estática; a base de dados, Auth, Edge Functions e Storage permanecem na Supabase. O workflow `.github/workflows/deploy-pages.yml` publica automaticamente a pasta `dist` quando há um push para `main`, ou pode ser iniciado manualmente em **GitHub → Actions**.
 
-1. No Cloudflare, criar um projeto Pages ligado ao GitHub e escolher a branch `main`.
-2. Definir o comando de build como `pnpm install --frozen-lockfile && pnpm run build` e a pasta de saída como `dist`.
-3. Em **Settings → Environment variables**, configurar `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY` para Preview e Production.
-4. Publicar. Depois, acrescentar o domínio `*.pages.dev` em **Supabase → Authentication → URL Configuration** como Site URL e Redirect URL.
+1. Em **GitHub → Settings → Secrets and variables → Actions → Variables**, criar `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` e `VITE_ADMIN_EMAIL`. A última variável só controla a apresentação da opção de gestão; a autorização é feita no servidor através do secret `ADMIN_EMAIL`.
+2. Em **GitHub → Settings → Pages**, definir **Build and deployment → Source** como **GitHub Actions**.
+3. Enviar as alterações para `main` e acompanhar o workflow **Deploy to GitHub Pages** no separador **Actions**.
+4. Após o workflow terminar com sucesso, abrir `https://shurikahta.github.io/tripledger/`.
+5. Em **Supabase → Authentication → URL Configuration**, definir esse endereço como **Site URL** e adicionar `https://shurikahta.github.io/tripledger/**` às **Redirect URLs**.
 
-Sem as variáveis de ambiente, a app apresenta apenas o ecrã de configuração. As chaves `service_role`, SMTP e Resend são segredos do backend e nunca devem ser adicionadas às variáveis `VITE_*` nem ao Git.
+Os valores `VITE_*` ficam incluídos no JavaScript público do site. A publishable key e o email do administrador são dados públicos; nunca adicionar `service_role`, credenciais SMTP ou Resend ao frontend, às variáveis `VITE_*` ou ao Git. O workflow falha com uma mensagem explícita se faltar alguma das três variáveis.
 
 O bucket `expense-attachments` é privado e aceita PDF, JPG e PNG até 10 MB. Os caminhos dos ficheiros usam o formato `<trip_id>/<expense_id>/<nome>`.
 

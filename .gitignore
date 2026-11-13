@@ -5,3 +5,5 @@ dist
 !.env.example
 .supabase
 supabase/.temp/
+.security-check.local.mjs
+SECURITY-REVIEW.local.md

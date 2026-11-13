@@ -6,6 +6,7 @@ import {
   ShieldCheck, Upload, Users, WalletCards, X,
 } from 'lucide-react'
 import { dateLabel, eurosToCents, isConfigured, money, supabase } from './lib/supabase'
+import { addOneMonthClamped, adjustScheduleAfterPayment, makeSchedule, splitEvenly } from './lib/finance'
 
 type Trip = { id: string; name: string; start_date: string | null; end_date: string | null; created_by: string }
 type Member = { id: string; trip_id: string; email: string; role: 'manager' | 'participant'; status: 'pending' | 'active' | 'revoked'; user_id: string | null }
@@ -431,7 +432,6 @@ function PlanForm({ members, selected, shares, schedules, repayments, onCancel, 
 
 function RepaymentForm({ members, selected, isManager, onCancel, onSave }: { members: Member[]; selected: string | null; isManager: boolean; onCancel: () => void; onSave: (member: string, cents: number, date: string, note: string) => Promise<void> }) { const [member, setMember] = useState(selected ?? members.find((m) => m.role !== 'manager')?.id ?? ''); const [amount, setAmount] = useState(''); const [date, setDate] = useState(todayISO()); const [note, setNote] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState(''); async function submit(e: FormEvent) { e.preventDefault(); if (!isManager) { setError('Só o manager pode confirmar um abatimento.'); return }; setBusy(true); setError(''); try { await onSave(member, eurosToCents(amount), date, note) } catch (e) { setError(errorMessage(e)) } finally { setBusy(false) } } return <form className="modal-form" onSubmit={(e) => void submit(e)}><p className="modal-hint">Regista o valor efetivamente abatido e a data em que aconteceu. Pode diferir da tranche prevista.</p><label>Participante<select required value={member} onChange={(e) => setMember(e.target.value)}>{members.map((m) => <option key={m.id} value={m.id}>{m.email}</option>)}</select></label><div className="form-row"><label>Valor abatido (€)<input type="number" min="0.01" step="0.01" required value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0,00"/></label><label>Data efetiva<input type="date" required value={date} onChange={(e) => setDate(e.target.value)}/></label></div><label>Nota (opcional)<input maxLength={240} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ex.: abatimento parcial deste mês"/></label>{error && <div className="inline-error">{error}</div>}<div className="modal-actions"><button type="button" className="button secondary" onClick={onCancel}>Cancelar</button><button className="button primary" disabled={busy || !isManager}>{busy ? 'A registar...' : 'Confirmar abatimento'} <Check size={16}/></button></div></form> }
 
-function splitEvenly(total: number, ids: string[]) { if (!ids.length || total <= 0) return ids.map((member) => ({ member, cents: 0 })); const base = Math.floor(total / ids.length); const remainder = total % ids.length; return ids.map((member, index) => ({ member, cents: base + (index < remainder ? 1 : 0) })) }
 function generateInternalPassword(length = 14) {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*'
   const randomValues = crypto.getRandomValues(new Uint8Array(length))
@@ -442,33 +442,6 @@ function generateInternalPassword(length = 14) {
   return output
 }
 function todayISO() { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}` }
-function addOneMonthClamped(dateValue: string) { const current = new Date(`${dateValue}T12:00:00`); const year = current.getFullYear(); const month = current.getMonth() + 1; const day = Math.min(current.getDate(), new Date(year, month + 1, 0).getDate()); return new Date(year, month, day, 12).toISOString().slice(0,10) }
-function monthDate(anchorDate: string, offset: number, anchorDay: number) { const anchor = new Date(`${anchorDate}T12:00:00`); const year = anchor.getFullYear(); const month = anchor.getMonth() + offset; return new Date(year, month, Math.min(anchorDay, new Date(year, month + 1, 0).getDate()), 12).toISOString().slice(0,10) }
-function makeSchedule(member: string, balance: number, monthly: number, startDate: string) { if (!balance || !monthly) return []; const count = Math.ceil(balance / monthly); if (count > 240) throw new Error('O plano excede 240 tranches. Aumenta o valor mensal.'); const start = new Date(`${startDate}T12:00:00`); const day = start.getDate(); return Array.from({ length: count }, (_, index) => { const year = start.getFullYear(); const month = start.getMonth() + index; const lastDay = new Date(year, month + 1, 0).getDate(); const due = new Date(year, month, Math.min(day, lastDay), 12); const planned = Math.min(monthly, balance - monthly * index); return { trip_member_id: member, due_date: due.toISOString().slice(0,10), planned_cents: planned } }) }
-function adjustScheduleAfterPayment(remaining: number, schedule: Schedule[], paidAt: string): PlanRow[] {
-  let balanceLeft = remaining
-  const future = schedule.filter((item) => item.due_date > paidAt).sort((a,b) => a.due_date.localeCompare(b.due_date))
-  const rows: PlanRow[] = []
-  for (const installment of future) {
-    if (balanceLeft <= 0) break
-    const planned = Math.min(installment.planned_cents, balanceLeft)
-    rows.push({ due_date: installment.due_date, planned_cents: planned })
-    balanceLeft -= planned
-  }
-  if (balanceLeft > 0) {
-    const monthly = Math.max(...schedule.map((item) => item.planned_cents))
-    const anchorDate = future.at(-1)?.due_date ?? paidAt
-    const anchorDay = Math.max(...schedule.map((item) => Number(item.due_date.slice(-2))))
-    let offset = 1
-    while (balanceLeft > 0 && rows.length < 240) {
-      const planned = Math.min(monthly, balanceLeft)
-      rows.push({ due_date: monthDate(anchorDate, offset++, anchorDay), planned_cents: planned })
-      balanceLeft -= planned
-    }
-    if (balanceLeft > 0) throw new Error('O plano excede 240 tranches.')
-  }
-  return rows
-}
 
 
 
